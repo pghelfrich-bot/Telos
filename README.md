@@ -66,8 +66,8 @@ provisions the KV store for the project automatically.
 3. Add two environment variables to the project (Settings, then Environment
    Variables):
 
-   - `ADMIN_PASSWORD` — the instructor password
-   - `SESSION_SECRET` — a long random string. If you change it later, every
+   - `ADMIN_PASSWORD`: the instructor password
+   - `SESSION_SECRET`: a long random string. If you change it later, every
      instructor session is signed out.
 
 4. Deploy. Deno Deploy builds on every push to the linked branch, so future
