@@ -104,6 +104,13 @@ Students get three tabs on the course page: the study guide with topic filters
 and search, a **Practice** tab where they pick topics and work through a
 shuffled deck of self-graded flashcards, and the submission form.
 
+The **Test builder** tab assembles a test from released questions. Pick
+questions, group them into blocks, and adjust the wording for the test only;
+the study guide is never touched. Each block copies to the clipboard as a
+single spaced, numbered list, ready to paste into one Canvas question with a
+free response box after it. The draft is saved in your browser per course, so
+it survives a refresh, but it lives only in that browser.
+
 ## Security and running costs
 
 Telos calls no third-party or AI APIs and has no runtime dependencies, so there

@@ -448,3 +448,149 @@ Deno.test("the student page carries the Telos wordmark and definition", () =>
       "the footer carries the definition",
     );
   }));
+
+// --- test builder ---
+
+async function openCourseConsole(handler: Handler, client: Client, courseTitle: string) {
+  const dom = loadPage(handler, "/");
+  const doc = dom.window.document;
+  await waitFor(() => doc.querySelector(".login-form") || null);
+  (doc.querySelector('[name="password"]') as any).value = ADMIN_PASSWORD;
+  (doc.querySelector(".login-form") as any)
+    .dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await waitFor(() => doc.querySelector(".course-row") || null);
+  const row = Array.prototype.find.call(
+    doc.querySelectorAll(".course-row"),
+    (r: any) => r.querySelector(".course-title")?.textContent === courseTitle,
+  ) as any;
+  row.querySelector(".open-course").click();
+  // The course view loads asynchronously; wait for its tabs to exist.
+  await waitFor(() => doc.querySelector("#test-panel") || null);
+  return dom;
+}
+
+function pickByText(doc: any, text: string) {
+  const label = Array.prototype.find.call(
+    doc.querySelectorAll(".tb-pick"),
+    (l: any) => l.querySelector(".tb-pick-text").textContent === text,
+  ) as any;
+  label.querySelector(".tb-check").checked = true;
+}
+
+Deno.test("the test builder groups edited questions into numbered blocks", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const dom = await openCourseConsole(handler, client, "UI Biology");
+    const doc = dom.window.document;
+
+    // Open the Test builder tab and wait for the picker to list all three
+    // released questions.
+    (Array.prototype.find.call(
+      doc.querySelectorAll(".tab"),
+      (t: any) => t.textContent === "Test builder",
+    ) as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-pick").length === 3 ? true : null));
+
+    // Block 1: the two cell questions, added one at a time so their order in
+    // the block is explicit.
+    pickByText(doc, "What is the mitochondrion known for?");
+    (doc.querySelector(".tb-add") as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-row").length === 1 ? true : null));
+    pickByText(doc, "What surrounds and protects the cell?");
+    (doc.querySelector(".tb-add") as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-row").length === 2 ? true : null));
+
+    // Block 2: the genetics question in a new block.
+    pickByText(doc, "What molecule carries genetic information?");
+    (doc.querySelector(".tb-block-select") as any).value = "new";
+    (doc.querySelector(".tb-add") as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-block").length === 2 ? true : null));
+
+    // Edit the first question's wording for the test only.
+    const firstArea = doc.querySelector('.tb-block[data-block="0"] .tb-text') as any;
+    firstArea.value = "Explain the main function of the mitochondrion.";
+    firstArea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+    // Block 1 preview: numbered 1 and 2, single spaced, with the edit applied.
+    const preview1 = (doc.querySelector('.tb-block[data-block="0"] .test-output') as any).textContent;
+    assert.equal(
+      preview1,
+      "1. Explain the main function of the mitochondrion.\n2. What surrounds and protects the cell?",
+    );
+
+    // Block 2 numbering restarts at 1.
+    const preview2 = (doc.querySelector('.tb-block[data-block="1"] .test-output') as any).textContent;
+    assert.equal(preview2, "1. What molecule carries genetic information?");
+
+    // The edit stayed in the draft: the study guide record is untouched.
+    const list = (await client.call("GET", `/api/courses/${course.id}/questions`)).data.questions;
+    const original = list.find((q: any) => q.question === "What is the mitochondrion known for?");
+    assert.ok(original, "the guide question keeps its original wording");
+    assert.equal(original.edited_question, null);
+
+    // The draft persists in the browser under the course key.
+    const draft = dom.window.localStorage.getItem(`telos-test-${course.id}`);
+    assert.ok(draft, "a draft was saved");
+    assert.ok(draft!.includes("Explain the main function of the mitochondrion."));
+  }));
+
+Deno.test("test builder rows reorder and remove, and the draft survives a reload", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const dom = await openCourseConsole(handler, client, "UI Biology");
+    const doc = dom.window.document;
+
+    (Array.prototype.find.call(
+      doc.querySelectorAll(".tab"),
+      (t: any) => t.textContent === "Test builder",
+    ) as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-pick").length === 3 ? true : null));
+
+    pickByText(doc, "What is the mitochondrion known for?");
+    (doc.querySelector(".tb-add") as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-row").length === 1 ? true : null));
+    pickByText(doc, "What surrounds and protects the cell?");
+    (doc.querySelector(".tb-add") as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-row").length === 2 ? true : null));
+
+    // Move the second question up; the preview order flips.
+    const rows = doc.querySelectorAll(".tb-row");
+    (rows[1].querySelector(".tb-up") as any).click();
+    const preview = (doc.querySelector(".test-output") as any).textContent;
+    assert.equal(
+      preview,
+      "1. What surrounds and protects the cell?\n2. What is the mitochondrion known for?",
+    );
+
+    // Remove the first row; one question remains, renumbered from 1.
+    (doc.querySelector(".tb-row .tb-remove") as any).click();
+    await waitFor(() => (doc.querySelectorAll(".tb-row").length === 1 ? true : null));
+    assert.equal(
+      (doc.querySelector(".test-output") as any).textContent,
+      "1. What is the mitochondrion known for?",
+    );
+
+    // A fresh page load restores the draft from storage. The draft must be in
+    // the new page's storage before the course opens, since the builder reads
+    // it when the course view renders.
+    const saved = dom.window.localStorage.getItem(`telos-test-${course.id}`);
+    const dom2 = loadPage(handler, "/");
+    const doc2 = dom2.window.document;
+    dom2.window.localStorage.setItem(`telos-test-${course.id}`, saved!);
+    await waitFor(() => doc2.querySelector(".login-form") || null);
+    (doc2.querySelector('[name="password"]') as any).value = ADMIN_PASSWORD;
+    (doc2.querySelector(".login-form") as any)
+      .dispatchEvent(new dom2.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => doc2.querySelector(".course-row") || null);
+    (doc2.querySelector(".open-course") as any).click();
+    await waitFor(() => doc2.querySelector("#test-panel") || null);
+    (Array.prototype.find.call(
+      doc2.querySelectorAll(".tab"),
+      (t: any) => t.textContent === "Test builder",
+    ) as any).click();
+    await waitFor(() => (doc2.querySelectorAll(".tb-row").length === 1 ? true : null));
+    assert.equal(
+      (doc2.querySelector(".test-output") as any).textContent,
+      "1. What is the mitochondrion known for?",
+    );
+  }));

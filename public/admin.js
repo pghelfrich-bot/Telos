@@ -212,36 +212,37 @@
     );
 
     var queuePanel = el("section", { class: "panel", id: "queue-panel" });
+    var testPanel = el("section", { class: "panel test-builder", id: "test-panel", hidden: true });
     var settingsPanel = el("section", { class: "panel settings", id: "settings-panel", hidden: true });
 
-    var tabQueue = el("button", {
-      class: "tab active",
-      type: "button",
-      text: "Queue",
-      onclick: function () {
-        setTab(true);
-      },
-    });
-    var tabSettings = el("button", {
-      class: "tab",
-      type: "button",
-      text: "Settings",
-      onclick: function () {
-        setTab(false);
-      },
-    });
-    function setTab(showQueue) {
-      queuePanel.hidden = !showQueue;
-      settingsPanel.hidden = showQueue;
-      tabQueue.className = "tab" + (showQueue ? " active" : "");
-      tabSettings.className = "tab" + (showQueue ? "" : " active");
+    var tabs = [];
+    function makeTab(label, panel) {
+      var btn = el("button", {
+        class: "tab",
+        type: "button",
+        text: label,
+        onclick: function () {
+          tabs.forEach(function (t) {
+            t.panel.hidden = t.btn !== btn;
+            t.btn.className = "tab" + (t.btn === btn ? " active" : "");
+          });
+        },
+      });
+      tabs.push({ btn: btn, panel: panel });
+      return btn;
     }
+    var tabQueue = makeTab("Queue", queuePanel);
+    var tabTest = makeTab("Test builder", testPanel);
+    var tabSettings = makeTab("Settings", settingsPanel);
+    tabQueue.className = "tab active";
 
-    main.appendChild(el("nav", { class: "tabs" }, [tabQueue, tabSettings]));
+    main.appendChild(el("nav", { class: "tabs" }, [tabQueue, tabTest, tabSettings]));
     main.appendChild(queuePanel);
+    main.appendChild(testPanel);
     main.appendChild(settingsPanel);
 
     renderSettings(settingsPanel, main, course);
+    renderTestBuilder(testPanel, course);
     await renderQueue(queuePanel, course.id);
   }
 
@@ -442,6 +443,307 @@
     ];
 
     return el("article", { class: "qcard", "data-id": q.id, "data-status": q.status, "data-search": haystack }, children);
+  }
+
+  // --- Test builder ---
+  // Assembles a test from released questions. Question text is copied into the
+  // draft, so edits here never touch the study guide. The draft lives in the
+  // browser per course and survives a refresh. Output is one single spaced,
+  // numbered list per block, ready to paste into a Canvas question.
+
+  function draftKey(courseId) {
+    return "telos-test-" + courseId;
+  }
+
+  function loadDraft(courseId) {
+    try {
+      var raw = SG.store.get(draftKey(courseId));
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return null;
+      var blocks = [];
+      parsed.forEach(function (b) {
+        if (!Array.isArray(b)) return;
+        var block = [];
+        b.forEach(function (q) {
+          if (q && typeof q.text === "string") block.push({ id: q.id || null, text: q.text });
+        });
+        blocks.push(block);
+      });
+      return blocks.length ? blocks : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function guideText(q) {
+    return q.edited_question != null && q.edited_question !== "" ? q.edited_question : q.question;
+  }
+
+  async function renderTestBuilder(panel, course) {
+    clear(panel);
+    panel.appendChild(el("p", { class: "loading", text: "Loading released questions..." }));
+    var res = await api.get("/api/courses/" + course.id + "/questions?status=released");
+    var released = (res.data && res.data.questions) || [];
+    clear(panel);
+
+    var blocks = loadDraft(course.id) || [[]];
+
+    function save() {
+      SG.store.set(draftKey(course.id), JSON.stringify(blocks));
+    }
+
+    // Each question becomes one numbered, single spaced line; internal line
+    // breaks collapse so the numbering stays clean when pasted.
+    function blockText(block) {
+      return block
+        .map(function (q, i) {
+          return (i + 1) + ". " + String(q.text).replace(/\s+/g, " ").trim();
+        })
+        .join("\n");
+    }
+
+    function wholeTestText() {
+      return blocks
+        .filter(function (b) {
+          return b.length > 0;
+        })
+        .map(blockText)
+        .join("\n\n");
+    }
+
+    function copy(text, btn) {
+      var original = btn.textContent;
+      function done() {
+        btn.textContent = "Copied";
+        setTimeout(function () {
+          btn.textContent = original;
+        }, 1500);
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function () {
+            btn.textContent = "Copy failed";
+          });
+          return;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      btn.textContent = "Copy failed";
+    }
+
+    panel.appendChild(el("h3", { text: "Build a test" }));
+    panel.appendChild(
+      el("p", {
+        class: "hint",
+        text:
+          "Pick released questions, group them into blocks, and adjust the wording for this test only. Nothing here changes the study guide. Each block copies as a single spaced numbered list, ready to paste into one Canvas question with a free response box after it.",
+      })
+    );
+
+    // Question picker.
+    var pickerBoxes = [];
+    var picker = el("div", { class: "tb-picker" });
+    if (released.length === 0) {
+      picker.appendChild(
+        el("p", { class: "empty", text: "No released questions yet. Release questions from the queue first." })
+      );
+    }
+    released.forEach(function (q) {
+      var box = el("input", { type: "checkbox", class: "tb-check", "data-id": q.id });
+      pickerBoxes.push({ box: box, q: q });
+      picker.appendChild(
+        el("label", { class: "tb-pick" }, [
+          box,
+          el("span", { class: "tb-pick-topic", text: q.topic || "Other" }),
+          el("span", { class: "tb-pick-text", text: guideText(q) }),
+        ])
+      );
+    });
+    panel.appendChild(picker);
+
+    var blockSelect = el("select", { class: "tb-block-select" });
+    function refreshBlockSelect() {
+      clear(blockSelect);
+      blocks.forEach(function (_, i) {
+        blockSelect.appendChild(el("option", { value: String(i), text: "Block " + (i + 1) }));
+      });
+      blockSelect.appendChild(el("option", { value: "new", text: "New block" }));
+      blockSelect.value = String(blocks.length - 1);
+    }
+
+    panel.appendChild(
+      el("div", { class: "tb-controls" }, [
+        el("span", { class: "field-label", text: "Add selected to" }),
+        blockSelect,
+        el("button", {
+          class: "tb-add",
+          type: "button",
+          text: "Add selected",
+          onclick: function () {
+            var chosen = pickerBoxes.filter(function (p) {
+              return p.box.checked;
+            });
+            if (chosen.length === 0) return;
+            var idx;
+            if (blockSelect.value === "new") {
+              blocks.push([]);
+              idx = blocks.length - 1;
+            } else {
+              idx = Number(blockSelect.value);
+            }
+            chosen.forEach(function (p) {
+              blocks[idx].push({ id: p.q.id, text: guideText(p.q) });
+              p.box.checked = false;
+            });
+            save();
+            renderBlocks();
+            refreshBlockSelect();
+          },
+        }),
+      ])
+    );
+
+    var blocksBox = el("div", { class: "tb-blocks" });
+    panel.appendChild(blocksBox);
+
+    panel.appendChild(
+      el("div", { class: "tb-footer" }, [
+        el("button", {
+          class: "tb-new-block",
+          type: "button",
+          text: "Add empty block",
+          onclick: function () {
+            blocks.push([]);
+            save();
+            renderBlocks();
+            refreshBlockSelect();
+          },
+        }),
+        el("button", {
+          class: "tb-copy-all",
+          type: "button",
+          text: "Copy entire test",
+          onclick: function (ev) {
+            copy(wholeTestText(), ev.target);
+          },
+        }),
+        el("button", {
+          class: "tb-clear",
+          type: "button",
+          text: "Clear test",
+          onclick: function () {
+            var ok = true;
+            try {
+              ok = window.confirm("Clear the whole test draft? This cannot be undone.");
+            } catch (e) {
+              /* no confirm available */
+            }
+            if (!ok) return;
+            blocks = [[]];
+            save();
+            renderBlocks();
+            refreshBlockSelect();
+          },
+        }),
+      ])
+    );
+
+    function renderBlocks() {
+      clear(blocksBox);
+      blocks.forEach(function (block, bi) {
+        var pre = el("pre", { class: "test-output", text: blockText(block) });
+        var rows = el("div", { class: "tb-rows" });
+        block.forEach(function (q, qi) {
+          var area = el("textarea", {
+            class: "tb-text",
+            rows: "2",
+            value: q.text,
+            oninput: function () {
+              q.text = area.value;
+              save();
+              pre.textContent = blockText(block);
+            },
+          });
+          rows.appendChild(
+            el("div", { class: "tb-row" }, [
+              el("span", { class: "tb-num", text: qi + 1 + "." }),
+              area,
+              el("div", { class: "tb-row-actions" }, [
+                el("button", {
+                  class: "tb-up",
+                  type: "button",
+                  text: "Up",
+                  disabled: qi === 0,
+                  onclick: function () {
+                    block.splice(qi, 1);
+                    block.splice(qi - 1, 0, q);
+                    save();
+                    renderBlocks();
+                  },
+                }),
+                el("button", {
+                  class: "tb-down",
+                  type: "button",
+                  text: "Down",
+                  disabled: qi === block.length - 1,
+                  onclick: function () {
+                    block.splice(qi, 1);
+                    block.splice(qi + 1, 0, q);
+                    save();
+                    renderBlocks();
+                  },
+                }),
+                el("button", {
+                  class: "tb-remove",
+                  type: "button",
+                  text: "Remove",
+                  onclick: function () {
+                    block.splice(qi, 1);
+                    save();
+                    renderBlocks();
+                  },
+                }),
+              ]),
+            ])
+          );
+        });
+        blocksBox.appendChild(
+          el("section", { class: "tb-block", "data-block": String(bi) }, [
+            el("div", { class: "tb-block-head" }, [
+              el("h4", { class: "tb-block-title", text: "Block " + (bi + 1) }),
+              el("button", {
+                class: "tb-copy-block",
+                type: "button",
+                text: "Copy block",
+                onclick: function (ev) {
+                  copy(blockText(block), ev.target);
+                },
+              }),
+              el("button", {
+                class: "tb-remove-block",
+                type: "button",
+                text: "Remove block",
+                onclick: function () {
+                  blocks.splice(bi, 1);
+                  if (blocks.length === 0) blocks.push([]);
+                  save();
+                  renderBlocks();
+                  refreshBlockSelect();
+                },
+              }),
+            ]),
+            block.length === 0 ? el("p", { class: "hint", text: "No questions in this block yet." }) : rows,
+            block.length === 0 ? null : el("div", { class: "tb-preview-label field-label", text: "Preview" }),
+            block.length === 0 ? null : pre,
+          ])
+        );
+      });
+    }
+
+    renderBlocks();
+    refreshBlockSelect();
   }
 
   // --- Settings ---
