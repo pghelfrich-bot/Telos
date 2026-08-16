@@ -18,7 +18,10 @@ import { exportCourse } from "./exports.ts";
 import type { Ctx } from "./types.ts";
 
 export interface HandlerOptions {
-  kv: Deno.Kv;
+  // Either a ready KV instance (tests) or a function that opens one lazily
+  // (production, so a missing KV does not crash warm-up on module load).
+  kv?: Deno.Kv;
+  openKv?: () => Promise<Deno.Kv>;
   env: Record<string, string | undefined>;
   staticRoot?: string;
 }
@@ -28,12 +31,33 @@ export type Handler = (request: Request, info?: Deno.ServeHandlerInfo) => Promis
 export function createHandler(opts: HandlerOptions): Handler {
   const staticRoot = opts.staticRoot ?? "public";
 
+  let kvPromise: Promise<Deno.Kv> | null = null;
+  function getKv(): Promise<Deno.Kv> {
+    if (opts.kv) return Promise.resolve(opts.kv);
+    if (!opts.openKv) throw new Error("createHandler needs kv or openKv");
+    if (!kvPromise) {
+      // Cache the promise, but drop it on failure so a later request retries.
+      kvPromise = opts.openKv().catch((err) => {
+        kvPromise = null;
+        throw err;
+      });
+    }
+    return kvPromise;
+  }
+
   return async function handler(request: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
+      let kv: Deno.Kv;
+      try {
+        kv = await getKv();
+      } catch (err) {
+        console.error("storage unavailable", err);
+        return json({ error: "storage is not configured" }, 503);
+      }
       const addr = info?.remoteAddr as Deno.NetAddr | undefined;
-      const ctx: Ctx = { kv: opts.kv, env: opts.env, ip: clientIp(request, addr?.hostname) };
+      const ctx: Ctx = { kv, env: opts.env, ip: clientIp(request, addr?.hostname) };
       try {
         return await route(request, ctx, url);
       } catch (err) {

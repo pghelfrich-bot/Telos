@@ -3,8 +3,13 @@
 
 import { createHandler } from "./server/handler.ts";
 
-const kv = await Deno.openKv();
-const env = Deno.env.toObject();
-const handler = createHandler({ kv, env, staticRoot: "public" });
+// Open KV lazily on the first API request rather than at module load, so a
+// deploy still warms up and serves pages even before a KV store is attached.
+const handler = createHandler({
+  openKv: () => Deno.openKv(),
+  env: Deno.env.toObject(),
+  staticRoot: "public",
+});
 
 Deno.serve(handler);
+
