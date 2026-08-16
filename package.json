@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "migrate:local": "wrangler d1 migrations apply study-guide --local",
     "migrate:remote": "wrangler d1 migrations apply study-guide --remote",
-    "test": "node --test test/"
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "devDependencies": {
     "jsdom": "^25.0.1",
