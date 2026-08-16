@@ -1,0 +1,27 @@
+{
+  // Study guide Worker configuration.
+  // Static assets serve from ./public/. API requests must reach the Worker,
+  // so run_worker_first routes /api/* to the Worker before the asset handler.
+  // Without it the single-page-application fallback returns HTML for API paths.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "study-guide",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "study-guide",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "RATE_LIMIT_SUBMISSIONS_PER_HOUR": "200"
+  }
+}

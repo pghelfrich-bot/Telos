@@ -1,0 +1,17 @@
+{
+  "name": "study-guide",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A web app for collecting, curating, and publishing student study questions.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "migrate:local": "wrangler d1 migrations apply study-guide --local",
+    "migrate:remote": "wrangler d1 migrations apply study-guide --remote",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "wrangler": "^4.0.0"
+  }
+}
