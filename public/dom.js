@@ -18,6 +18,7 @@
       else if (k === "value") node.value = v;
       else if (k === "hidden") node.hidden = !!v;
       else if (k === "disabled") node.disabled = !!v;
+      else if (k === "checked") node.checked = !!v;
       else if (k.slice(0, 2) === "on" && typeof v === "function") node.addEventListener(k.slice(2).toLowerCase(), v);
       else node.setAttribute(k, v);
     });

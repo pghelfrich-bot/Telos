@@ -44,26 +44,52 @@ async function waitFor(fn, timeout = 6000) {
 }
 
 // Load index.html into jsdom at the given path, inject the real public scripts,
-// and route the page's fetch calls to the running worker.
+// and route the page's fetch calls to the running worker. A per-page cookie jar
+// carries the session, since node's fetch has none, and transient connection
+// resets are retried.
 function loadPage(path) {
+  const jar = new Map();
+  const pageFetch = async (input, init) => {
+    const url = new URL(input, srv.baseUrl);
+    const opts = init ? { ...init } : {};
+    const headers = new Headers(opts.headers || {});
+    if (jar.size) headers.set("cookie", [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; "));
+    opts.headers = headers;
+
+    let res;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(url, opts);
+        break;
+      } catch (err) {
+        if (attempt >= 5) throw err;
+        await sleep(200);
+      }
+    }
+
+    const setCookies =
+      typeof res.headers.getSetCookie === "function"
+        ? res.headers.getSetCookie()
+        : res.headers.get("set-cookie")
+        ? [res.headers.get("set-cookie")]
+        : [];
+    for (const sc of setCookies) {
+      const pair = sc.split(";")[0];
+      const eq = pair.indexOf("=");
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      if (/max-age=0/i.test(sc)) jar.delete(name);
+      else jar.set(name, value);
+    }
+    return res;
+  };
+
   const dom = new JSDOM(pub("index.html"), {
     url: srv.baseUrl + path,
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(window) {
-      // Resolve relative URLs to the worker and retry transient connection
-      // resets, which happen with keep-alive against a local worker.
-      window.fetch = async (input, init) => {
-        const url = new URL(input, srv.baseUrl);
-        for (let attempt = 0; ; attempt++) {
-          try {
-            return await fetch(url, init);
-          } catch (err) {
-            if (attempt >= 5) throw err;
-            await sleep(200);
-          }
-        }
-      };
+      window.fetch = pageFetch;
     },
   });
   const { document } = dom.window;
@@ -204,4 +230,77 @@ test("a validation failure surfaces as a visible error", async () => {
 
   const rows = srv.exec("SELECT COUNT(*) AS n FROM questions WHERE author = 'Bad Submitter';");
   assert.equal(rows[0].n, 0, "an invalid submission is not stored");
+});
+
+// --- Milestone 7: instructor console ---
+
+const ADMIN_PASSWORD = "test-password-123";
+
+// Seed a course with a named pending question for the console to review.
+function seedConsoleCourse(slug) {
+  srv.exec(`INSERT INTO courses (slug, title, topics, accepting) VALUES ('${slug}', 'Console Course', '["General"]', 1);`);
+  const cid = srv.exec(`SELECT id FROM courses WHERE slug = '${slug}';`)[0].id;
+  srv.exec(
+    `INSERT INTO questions (course_id, author, topic, question, answer, status) VALUES
+      (${cid}, 'Queue Student', 'General', 'A pending question awaiting review in the console.', 'A pending answer awaiting review in the console.', 'pending');`
+  );
+  return { slug, cid };
+}
+
+function qcardByAuthor(doc, author) {
+  return Array.prototype.find.call(doc.querySelectorAll(".qcard"), function (c) {
+    const a = c.querySelector(".q-author");
+    return a && a.textContent === author;
+  });
+}
+
+test("the instructor signs in, edits and releases a question, then signs out", async () => {
+  seedConsoleCourse("console-flow");
+  const dom = loadPage("/");
+  const doc = dom.window.document;
+
+  // The console starts at a login form.
+  await waitFor(() => (doc.querySelector(".login-form") ? true : null));
+
+  // A wrong password surfaces an error and does not sign in.
+  doc.querySelector('[name="password"]').value = "wrong-password";
+  doc.querySelector(".login-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const loginError = await waitFor(() => {
+    const e = doc.querySelector(".login-error");
+    return e && !e.hidden ? e : null;
+  });
+  assert.match(loginError.textContent, /Incorrect password/);
+
+  // The correct password reveals the course list.
+  doc.querySelector('[name="password"]').value = ADMIN_PASSWORD;
+  doc.querySelector(".login-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await waitFor(() => (doc.querySelector(".course-row") ? true : null));
+
+  // Open the seeded course.
+  const row = Array.prototype.find.call(doc.querySelectorAll(".course-row"), function (r) {
+    return r.querySelector(".course-title").textContent === "Console Course";
+  });
+  assert.ok(row, "the seeded course appears in the list");
+  row.querySelector(".open-course").click();
+
+  // The queue shows the pending question.
+  await waitFor(() => (qcardByAuthor(doc, "Queue Student") ? true : null));
+  const card = qcardByAuthor(doc, "Queue Student");
+  card.querySelector('[name="edited_question"]').value = "Instructor reworded question for the console test.";
+  card.querySelector(".save-release").click();
+
+  // The release round-trips through the API and the card re-renders as released.
+  await waitFor(() => {
+    const c = qcardByAuthor(doc, "Queue Student");
+    return c && c.getAttribute("data-status") === "released" ? c : null;
+  });
+
+  // Verify the edit landed via the database.
+  const rows = srv.exec("SELECT edited_question, status FROM questions WHERE author = 'Queue Student';");
+  assert.equal(rows[0].status, "released");
+  assert.equal(rows[0].edited_question, "Instructor reworded question for the console test.");
+
+  // Sign out returns to the login form.
+  doc.querySelector(".logout").click();
+  await waitFor(() => (doc.querySelector(".login-form") ? true : null));
 });
