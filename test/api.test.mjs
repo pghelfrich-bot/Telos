@@ -10,7 +10,7 @@ let srv;
 // A generous ceiling so functional tests never trip the limiter; the
 // dedicated rate-limit test starts its own low-ceiling worker.
 before(async () => {
-  srv = await startServer({ RATE_LIMIT_SUBMISSIONS_PER_HOUR: 1000 });
+  srv = await startServer({ RATE_LIMIT_SUBMISSIONS_PER_HOUR: 1000, RATE_LIMIT_LOGINS_PER_HOUR: 1000 });
   srv.exec(`
     INSERT INTO courses (id, slug, title, topics, accepting, show_authors, archived) VALUES
       (1, 'bio-open', 'Intro Biology', '["Cells","Genetics"]', 1, 0, 0),
@@ -39,6 +39,37 @@ function submission(overrides = {}) {
     ...overrides,
   };
 }
+
+// The password comes from .dev.vars, which wrangler dev loads automatically.
+const ADMIN_PASSWORD = "test-password-123";
+
+// Log in and return the session cookie string for use on protected routes.
+async function login(password = ADMIN_PASSWORD) {
+  const res = await api(srv.baseUrl, "/api/login", { method: "POST", json: { password } });
+  const setCookie = res.headers.get("set-cookie");
+  return { status: res.status, data: res.data, cookie: setCookie ? setCookie.split(";")[0] : null };
+}
+
+// Create a course through the API and return its record.
+async function makeCourse(cookie, body) {
+  const res = await api(srv.baseUrl, "/api/courses", { method: "POST", json: body, headers: { cookie } });
+  assert.equal(res.status, 201, "course creation should succeed");
+  return res.data.course;
+}
+
+// Submit a question through the public route, then look it up by author on the
+// instructor route so the test references it by name, not by position.
+async function makeQuestion(cookie, courseId, slug, body) {
+  const sub = await api(srv.baseUrl, `/api/course/${slug}/questions`, {
+    method: "POST",
+    json: body,
+    headers: { "cf-connecting-ip": `10.10.${(counter >> 8) & 255}.${counter++ & 255}` },
+  });
+  assert.equal(sub.status, 201, "submission should succeed");
+  const list = await api(srv.baseUrl, `/api/courses/${courseId}/questions`, { headers: { cookie } });
+  return list.data.questions.find((q) => q.author === body.name);
+}
+let counter = 1;
 
 test("GET /api/course/:slug returns header and released questions only", async () => {
   const res = await api(srv.baseUrl, "/api/course/bio-open");
@@ -216,4 +247,214 @@ test("submission rate limit triggers at the configured ceiling and is per IP", a
   } finally {
     await limited.stop();
   }
+});
+
+// --- Milestone 4: instructor routes and session auth ---
+
+test("every protected route rejects an unauthenticated request with 401", async () => {
+  const calls = [
+    ["GET", "/api/courses"],
+    ["POST", "/api/courses"],
+    ["PATCH", "/api/courses/1"],
+    ["DELETE", "/api/courses/1"],
+    ["GET", "/api/courses/1/questions"],
+    ["PATCH", "/api/questions/1"],
+    ["POST", "/api/questions/status"],
+  ];
+  for (const [method, path] of calls) {
+    const res = await api(srv.baseUrl, path, { method, json: method === "GET" || method === "DELETE" ? undefined : {} });
+    assert.equal(res.status, 401, `${method} ${path} should require authentication`);
+  }
+});
+
+test("login rejects a wrong password and accepts the correct one", async () => {
+  const wrong = await login("not-the-password");
+  assert.equal(wrong.status, 401);
+  assert.equal(wrong.cookie, null);
+
+  const right = await login();
+  assert.equal(right.status, 200);
+  assert.ok(right.cookie, "a session cookie should be issued");
+
+  const meRes = await api(srv.baseUrl, "/api/me", { headers: { cookie: right.cookie } });
+  assert.equal(meRes.data.authenticated, true);
+});
+
+test("a tampered or garbage cookie is treated as unauthenticated", async () => {
+  const { cookie } = await login();
+  // Flip the last character of the signature.
+  const last = cookie.slice(-1) === "a" ? "b" : "a";
+  const tampered = cookie.slice(0, -1) + last;
+
+  const t = await api(srv.baseUrl, "/api/courses", { headers: { cookie: tampered } });
+  assert.equal(t.status, 401, "a tampered signature must not authenticate");
+
+  const g = await api(srv.baseUrl, "/api/courses", { headers: { cookie: "sg_session=complete-garbage" } });
+  assert.equal(g.status, 401, "a garbage cookie must not authenticate");
+
+  const meRes = await api(srv.baseUrl, "/api/me", { headers: { cookie: tampered } });
+  assert.equal(meRes.data.authenticated, false);
+});
+
+test("course slugs are the title slugified plus a random hex suffix", async () => {
+  const { cookie } = await login();
+  const a = await makeCourse(cookie, { title: "Genetics 101" });
+  const b = await makeCourse(cookie, { title: "Genetics 101" });
+  assert.match(a.slug, /^genetics-101-[0-9a-f]{8}$/);
+  assert.match(b.slug, /^genetics-101-[0-9a-f]{8}$/);
+  assert.notEqual(a.slug, b.slug, "the random suffix must differ between courses");
+});
+
+test("an edit identical to the original is discarded server-side", async () => {
+  const { cookie } = await login();
+  const course = await makeCourse(cookie, { title: "Edit Rule", topics: ["General"] });
+  const q = await makeQuestion(cookie, course.id, course.slug, {
+    name: "Ada Original",
+    topic: "General",
+    question: "The original student question text goes here.",
+    answer: "The original student answer text goes here.",
+  });
+
+  // An edit that matches the original is stored as null.
+  const same = await api(srv.baseUrl, `/api/questions/${q.id}`, {
+    method: "PATCH",
+    json: { edited_question: "The original student question text goes here." },
+    headers: { cookie },
+  });
+  assert.equal(same.status, 200);
+  assert.equal(same.data.question.edited_question, null, "an identical edit must not be stored");
+
+  // A genuine edit is kept.
+  const real = await api(srv.baseUrl, `/api/questions/${q.id}`, {
+    method: "PATCH",
+    json: { edited_question: "A genuinely reworded instructor version of the question." },
+    headers: { cookie },
+  });
+  assert.equal(real.data.question.edited_question, "A genuinely reworded instructor version of the question.");
+
+  // The student original is never overwritten.
+  const rows = srv.exec(`SELECT question FROM questions WHERE id = ${q.id};`);
+  assert.equal(rows[0].question, "The original student question text goes here.");
+});
+
+test("re-releasing an already released question keeps its original released_at", async () => {
+  const { cookie } = await login();
+  const course = await makeCourse(cookie, { title: "Release Rule", topics: ["General"] });
+  const q = await makeQuestion(cookie, course.id, course.slug, {
+    name: "Grace Release",
+    topic: "General",
+    question: "A question that will be released and then re-released.",
+    answer: "An answer that will be released and then re-released.",
+  });
+
+  const first = await api(srv.baseUrl, "/api/questions/status", {
+    method: "POST",
+    json: { ids: [q.id], status: "released" },
+    headers: { cookie },
+  });
+  assert.equal(first.status, 200);
+  const afterFirst = srv.exec(`SELECT released_at FROM questions WHERE id = ${q.id};`)[0].released_at;
+  assert.ok(afterFirst, "released_at should be set on first release");
+
+  // Re-release; released_at must not move.
+  await api(srv.baseUrl, "/api/questions/status", {
+    method: "POST",
+    json: { ids: [q.id], status: "released" },
+    headers: { cookie },
+  });
+  const afterSecond = srv.exec(`SELECT released_at FROM questions WHERE id = ${q.id};`)[0].released_at;
+  assert.equal(afterSecond, afterFirst, "re-releasing must keep the original released_at");
+});
+
+test("a partial PATCH leaves the other fields alone", async () => {
+  const { cookie } = await login();
+  const course = await makeCourse(cookie, { title: "Partial Course", topics: ["Alpha", "Beta"], accepting: true });
+  const q = await makeQuestion(cookie, course.id, course.slug, {
+    name: "Partial Person",
+    topic: "Alpha",
+    question: "The original question for the partial patch test here.",
+    answer: "The original answer for the partial patch test here.",
+  });
+
+  // Set an edit and a topic first.
+  await api(srv.baseUrl, `/api/questions/${q.id}`, {
+    method: "PATCH",
+    json: { edited_question: "An edited version to preserve across a later patch.", topic: "Beta" },
+    headers: { cookie },
+  });
+
+  // Now patch only notes; the edit and topic must survive.
+  const res = await api(srv.baseUrl, `/api/questions/${q.id}`, {
+    method: "PATCH",
+    json: { notes: "A private instructor note." },
+    headers: { cookie },
+  });
+  assert.equal(res.data.question.notes, "A private instructor note.");
+  assert.equal(res.data.question.edited_question, "An edited version to preserve across a later patch.");
+  assert.equal(res.data.question.topic, "Beta");
+
+  // A partial course PATCH is the same story.
+  const patched = await api(srv.baseUrl, `/api/courses/${course.id}`, {
+    method: "PATCH",
+    json: { accepting: false },
+    headers: { cookie },
+  });
+  assert.equal(patched.data.course.accepting, false);
+  assert.equal(patched.data.course.title, "Partial Course", "title should be untouched");
+  assert.deepEqual(patched.data.course.topics, ["Alpha", "Beta"], "topics should be untouched");
+});
+
+test("archiving a course hides it from students", async () => {
+  const { cookie } = await login();
+  const course = await makeCourse(cookie, { title: "Soon Archived", topics: ["General"] });
+
+  // Visible before archiving.
+  const before = await api(srv.baseUrl, `/api/course/${course.slug}`);
+  assert.equal(before.status, 200);
+
+  await api(srv.baseUrl, `/api/courses/${course.id}`, {
+    method: "PATCH",
+    json: { archived: true },
+    headers: { cookie },
+  });
+
+  const after = await api(srv.baseUrl, `/api/course/${course.slug}`);
+  assert.equal(after.status, 404, "an archived course must be hidden from students");
+
+  const submit = await api(srv.baseUrl, `/api/course/${course.slug}/questions`, {
+    method: "POST",
+    json: submission(),
+    headers: { "cf-connecting-ip": "10.20.30.40" },
+  });
+  assert.equal(submit.status, 404, "an archived course must not accept submissions");
+});
+
+test("DELETE removes a course and its questions", async () => {
+  const { cookie } = await login();
+  const course = await makeCourse(cookie, { title: "Delete Me", topics: ["General"] });
+  const q = await makeQuestion(cookie, course.id, course.slug, {
+    name: "Doomed Author",
+    topic: "General",
+    question: "A question that should be deleted with its course here.",
+    answer: "An answer that should be deleted with its course here.",
+  });
+
+  const del = await api(srv.baseUrl, `/api/courses/${course.id}`, { method: "DELETE", headers: { cookie } });
+  assert.equal(del.status, 200);
+
+  const gone = srv.exec(`SELECT COUNT(*) AS n FROM questions WHERE id = ${q.id};`);
+  assert.equal(gone[0].n, 0, "the course's questions should be gone");
+  const courseGone = srv.exec(`SELECT COUNT(*) AS n FROM courses WHERE id = ${course.id};`);
+  assert.equal(courseGone[0].n, 0);
+});
+
+test("logout clears the session", async () => {
+  const { cookie } = await login();
+  const ok = await api(srv.baseUrl, "/api/courses", { headers: { cookie } });
+  assert.equal(ok.status, 200);
+
+  const out = await api(srv.baseUrl, "/api/logout", { method: "POST", headers: { cookie } });
+  assert.equal(out.status, 200);
+  const cleared = out.headers.get("set-cookie");
+  assert.match(cleared, /Max-Age=0/, "logout should expire the cookie");
 });

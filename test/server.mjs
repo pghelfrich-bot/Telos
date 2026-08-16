@@ -131,7 +131,18 @@ export async function api(baseUrl, path, options = {}) {
   if (options.raw !== undefined) {
     body = options.raw;
   }
-  const res = await fetch(baseUrl + path, { method: options.method || "GET", headers, body });
+  // Retry transient connection errors: a local worker can briefly drop
+  // connections while wrangler hot-reloads.
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(baseUrl + path, { method: options.method || "GET", headers, body });
+      break;
+    } catch (err) {
+      if (attempt >= 5) throw err;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
   const text = await res.text();
   let data = null;
   try {
