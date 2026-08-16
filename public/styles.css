@@ -1,0 +1,247 @@
+/* Study guide styles. Mobile first, since most students are on phones. */
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #5a5a5a;
+  --line: #d8d8d8;
+  --bg: #ffffff;
+  --panel: #f7f7f5;
+  --accent: #1f5c8a;
+  --accent-ink: #ffffff;
+  --danger: #9a1f1f;
+  --ok: #1f6b3a;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+#app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 1rem 1rem 4rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.course-header h1 {
+  margin-bottom: 0.25rem;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.6rem 0.4rem;
+  font-size: 1rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Topic chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.chip.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.chip .count {
+  opacity: 0.75;
+}
+
+.controls {
+  margin-bottom: 1rem;
+}
+
+.showall {
+  border: 1px solid var(--accent);
+  background: var(--bg);
+  color: var(--accent);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.9rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+/* Guide cards */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--bg);
+}
+
+.card-topic {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+/* Questions read in a serif face to set them apart from the interface. */
+.question {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0 0 0.6rem;
+  line-height: 1.35;
+}
+
+.author {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.reveal {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.answer {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+  white-space: pre-wrap;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.empty,
+.closed,
+.loading {
+  color: var(--muted);
+}
+
+/* Submission form */
+.submit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: 40rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.field-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.submit-form input,
+.submit-form select,
+.submit-form textarea {
+  font: inherit;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: 100%;
+}
+
+.submit {
+  align-self: flex-start;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.6rem 1.2rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.form-error {
+  color: var(--danger);
+  background: #fbeaea;
+  border: 1px solid #e6b3b3;
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+}
+
+.form-success {
+  color: var(--ok);
+  background: #e8f4ec;
+  border: 1px solid #b3d9c1;
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+}
+
+.notice {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+/* Print: drop the interface chrome and show every answer. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .answer {
+    display: block !important;
+  }
+  .card {
+    break-inside: avoid;
+    border-color: #999;
+  }
+}
