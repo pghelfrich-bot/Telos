@@ -439,3 +439,15 @@ Deno.test("the server serves the SPA shell for a student route", () =>
     const html = await res.text();
     assert.ok(html.includes('id="app"'));
   }));
+
+// --- storage health probe ---
+
+Deno.test("the health probe reports durable storage with a stable marker", () =>
+  withApp({}, async ({ client }) => {
+    const first = await client.call("GET", "/api/health");
+    assert.equal(first.status, 200);
+    assert.equal(first.data.marker_created_this_request, true);
+    const second = await client.call("GET", "/api/health");
+    assert.equal(second.data.marker, first.data.marker, "marker is stable on durable storage");
+    assert.equal(second.data.marker_created_this_request, false);
+  }));

@@ -4,6 +4,7 @@
 
 import { clientIp, json } from "./lib.ts";
 import { getCourse, submitQuestion } from "./public.ts";
+import { health } from "./health.ts";
 import { hasSession, login, logout, me } from "./auth.ts";
 import {
   bulkStatusRoute,
@@ -128,6 +129,10 @@ async function route(request: Request, ctx: Ctx, url: URL): Promise<Response> {
     .map(decodeURIComponent);
 
   // --- Public routes ---
+  if (seg[0] === "health" && seg.length === 1) {
+    if (method === "GET") return health(ctx);
+    return methodNotAllowed("GET");
+  }
   if (seg[0] === "course" && seg.length === 2) {
     if (method === "GET") return getCourse(ctx, seg[1]);
     return methodNotAllowed("GET");
