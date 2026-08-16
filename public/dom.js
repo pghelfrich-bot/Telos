@@ -62,6 +62,42 @@
     },
   };
 
+  // Theme handling. The default follows the system preference; a click on the
+  // toggle pins an explicit choice and remembers it.
+  SG.theme = {
+    KEY: "telos-theme",
+    current: function () {
+      var pinned = document.documentElement.getAttribute("data-theme");
+      if (pinned === "dark" || pinned === "light") return pinned;
+      try {
+        if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
+      } catch (e) {
+        /* ignore */
+      }
+      return "light";
+    },
+    set: function (theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+      SG.store.set(SG.theme.KEY, theme);
+    },
+    toggleButton: function () {
+      var btn = SG.el("button", {
+        class: "theme-toggle no-print",
+        type: "button",
+        "aria-label": "Switch between light and dark mode",
+      });
+      function refresh() {
+        btn.textContent = SG.theme.current() === "dark" ? "Light mode" : "Dark mode";
+      }
+      btn.addEventListener("click", function () {
+        SG.theme.set(SG.theme.current() === "dark" ? "light" : "dark");
+        refresh();
+      });
+      refresh();
+      return btn;
+    },
+  };
+
   async function safeJson(res) {
     try {
       return await res.json();

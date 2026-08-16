@@ -69,11 +69,28 @@
     var tabForm = makeTab("Submit a question", formPanel);
     tabGuide.className = "tab active";
 
-    root.appendChild(el("header", { class: "course-header" }, [el("h1", { text: course.title })]));
+    root.appendChild(
+      el("header", { class: "course-header" }, [
+        el("div", { class: "brand-row no-print" }, [
+          el("span", { class: "wordmark" }, [
+            el("span", { class: "wordmark-name", text: "Telos" }),
+            el("span", { class: "wordmark-greek", text: "τέλος" }),
+          ]),
+          SG.theme.toggleButton(),
+        ]),
+        el("h1", { text: course.title }),
+      ])
+    );
     root.appendChild(el("nav", { class: "tabs no-print" }, [tabGuide, tabPractice, tabForm]));
     root.appendChild(guidePanel);
     root.appendChild(practicePanel);
     root.appendChild(formPanel);
+    root.appendChild(
+      el("footer", {
+        class: "site-footer",
+        text: "Telos, from the Greek τέλος: an end, an aim, the purpose toward which a thing tends.",
+      })
+    );
 
     renderGuide(guidePanel, course);
     renderPracticeSetup(practicePanel, course);

@@ -58,6 +58,10 @@
       },
       [
         el("h1", { text: "Telos" }),
+        el("p", {
+          class: "login-tagline",
+          text: "τέλος: the end toward which all effort aims",
+        }),
         el("p", { class: "hint", text: "Instructor sign in" }),
         el("label", { class: "field" }, [el("span", { class: "field-label", text: "Password" }), password]),
         error,
@@ -73,20 +77,26 @@
     clear(root);
     root.appendChild(
       el("header", { class: "admin-header" }, [
-        el("h1", { text: "Telos" }),
-        el("button", {
-          class: "logout no-print",
-          type: "button",
-          text: "Sign out",
-          onclick: async function () {
-            try {
-              await api.send("POST", "/api/logout");
-            } catch (e) {
-              /* ignore */
-            }
-            renderAdmin(root);
-          },
-        }),
+        el("h1", { class: "wordmark" }, [
+          el("span", { class: "wordmark-name", text: "Telos" }),
+          el("span", { class: "wordmark-greek", text: "τέλος" }),
+        ]),
+        el("div", { class: "admin-header-actions" }, [
+          SG.theme.toggleButton(),
+          el("button", {
+            class: "logout no-print",
+            type: "button",
+            text: "Sign out",
+            onclick: async function () {
+              try {
+                await api.send("POST", "/api/logout");
+              } catch (e) {
+                /* ignore */
+              }
+              renderAdmin(root);
+            },
+          }),
+        ]),
       ])
     );
     var main = el("div", { class: "admin-main" });

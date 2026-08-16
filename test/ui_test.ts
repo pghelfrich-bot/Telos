@@ -414,3 +414,37 @@ Deno.test("the topics editor adds, renames, and removes topics without touching 
     assert.equal(q.topic, "Cell Structure", "the question followed the rename");
     assert.equal(list.length, 1, "no questions were deleted");
   }));
+
+Deno.test("the theme toggle pins dark mode and remembers the choice", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const dom = loadPage(handler, `/c/${course.slug}`);
+    const doc = dom.window.document;
+    await waitFor(() => doc.querySelector(".theme-toggle") || null);
+
+    const toggle = doc.querySelector(".theme-toggle") as any;
+    assert.equal(toggle.textContent, "Dark mode", "with no preference the page offers dark mode");
+    assert.equal(doc.documentElement.getAttribute("data-theme"), null, "no theme is pinned by default");
+
+    toggle.click();
+    assert.equal(doc.documentElement.getAttribute("data-theme"), "dark", "the choice is pinned on the root");
+    assert.equal(dom.window.localStorage.getItem("telos-theme"), "dark", "the choice is remembered");
+    assert.equal(toggle.textContent, "Light mode");
+
+    toggle.click();
+    assert.equal(doc.documentElement.getAttribute("data-theme"), "light");
+    assert.equal(dom.window.localStorage.getItem("telos-theme"), "light");
+  }));
+
+Deno.test("the student page carries the Telos wordmark and definition", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const doc = loadPage(handler, `/c/${course.slug}`).window.document;
+    await waitFor(() => doc.querySelector(".wordmark") || null);
+    assert.equal((doc.querySelector(".wordmark-name") as any).textContent, "Telos");
+    assert.equal((doc.querySelector(".wordmark-greek") as any).textContent, "τέλος");
+    assert.ok(
+      (doc.querySelector(".site-footer") as any).textContent.includes("an end, an aim"),
+      "the footer carries the definition",
+    );
+  }));
