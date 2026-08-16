@@ -486,3 +486,130 @@ h1 {
   align-items: center;
   gap: 0.4rem;
 }
+
+/* Guide search */
+.controls {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.guide-search {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+}
+
+/* Practice tab */
+.practice-heading {
+  font-size: 1.2rem;
+  margin: 0.25rem 0 0.25rem;
+}
+
+.practice-topics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.practice-topic {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.practice-warn {
+  color: var(--danger);
+}
+
+.practice-progress {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.6rem;
+}
+
+.practice-card {
+  margin-bottom: 1rem;
+}
+
+.practice-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.practice-quit {
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0;
+}
+
+.practice-summary {
+  margin: 0.5rem 0 1rem;
+}
+
+/* Topics editor */
+.topics-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.topic-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.topic-name {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+  background: var(--panel);
+}
+
+.topic-rename,
+.topic-remove,
+.topic-add,
+.topic-rename-save,
+.topic-rename-cancel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.topic-remove {
+  color: var(--danger);
+  border-color: #e6b3b3;
+}
+
+.topic-add {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.topic-add-input,
+.topic-rename-input {
+  flex: 1;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+}

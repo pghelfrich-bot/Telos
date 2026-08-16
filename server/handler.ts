@@ -12,6 +12,7 @@ import {
   deleteCourseRoute,
   listCoursesRoute,
   listQuestionsRoute,
+  renameTopicRoute,
   updateCourseRoute,
   updateQuestionRoute,
 } from "./admin.ts";
@@ -202,6 +203,12 @@ function matchProtected(seg: string[]): ProtectedHandler | null {
       return (_request, ctx, url, method) => {
         if (method === "GET") return exportCourse(ctx, id, url);
         return methodNotAllowed("GET");
+      };
+    }
+    if (seg.length === 4 && seg[2] === "topics" && seg[3] === "rename") {
+      return (request, ctx, _url, method) => {
+        if (method === "POST") return renameTopicRoute(request, ctx, id);
+        return methodNotAllowed("POST");
       };
     }
     return null;

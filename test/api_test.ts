@@ -451,3 +451,55 @@ Deno.test("the health probe reports durable storage with a stable marker", () =>
     assert.equal(second.data.marker, first.data.marker, "marker is stable on durable storage");
     assert.equal(second.data.marker_created_this_request, false);
   }));
+
+// --- topic management ---
+
+Deno.test("renaming a topic updates the course list and its questions", () =>
+  withApp({}, async ({ client }) => {
+    await login(client);
+    const course = await makeCourse(client, { title: "Topic Course", topics: ["Alpha", "Beta"] });
+    const alphaQ = await makeQuestion(client, course.id, course.slug, {
+      name: "Alpha Person", topic: "Alpha",
+      question: "A question filed under the Alpha topic for the rename test.",
+      answer: "An answer filed under the Alpha topic for the rename test.",
+    });
+    const betaQ = await makeQuestion(client, course.id, course.slug, {
+      name: "Beta Person", topic: "Beta",
+      question: "A question filed under the Beta topic that must not change.",
+      answer: "An answer filed under the Beta topic that must not change.",
+    });
+
+    const res = await client.call("POST", `/api/courses/${course.id}/topics/rename`, {
+      json: { from: "Alpha", to: "Cell Structure" },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.data.course.topics, ["Cell Structure", "Beta"], "list keeps its order with the new name");
+    assert.equal(res.data.updated, 1, "exactly the Alpha question was updated");
+
+    const list = (await client.call("GET", `/api/courses/${course.id}/questions`)).data.questions;
+    assert.equal(list.find((q: any) => q.id === alphaQ.id).topic, "Cell Structure");
+    assert.equal(list.find((q: any) => q.id === betaQ.id).topic, "Beta", "other topics are untouched");
+  }));
+
+Deno.test("removing a topic from the course leaves its questions intact", () =>
+  withApp({}, async ({ client }) => {
+    await login(client);
+    const course = await makeCourse(client, { title: "Removal Course", topics: ["Keep", "Drop"] });
+    const dropQ = await makeQuestion(client, course.id, course.slug, {
+      name: "Drop Person", topic: "Drop",
+      question: "A question in the Drop topic that must survive removal.",
+      answer: "An answer in the Drop topic that must survive removal.",
+    });
+    await client.call("POST", "/api/questions/status", { json: { ids: [dropQ.id], status: "released" } });
+
+    const patched = await client.call("PATCH", `/api/courses/${course.id}`, { json: { topics: ["Keep"] } });
+    assert.deepEqual(patched.data.course.topics, ["Keep"]);
+
+    // The question still exists with its original label and still shows in the
+    // student guide as an extra topic.
+    const list = (await client.call("GET", `/api/courses/${course.id}/questions`)).data.questions;
+    assert.equal(list.find((q: any) => q.id === dropQ.id).topic, "Drop");
+    const guide = await client.call("GET", `/api/course/${course.slug}`);
+    assert.equal(guide.data.questions.length, 1);
+    assert.equal(guide.data.questions[0].topic, "Drop");
+  }));

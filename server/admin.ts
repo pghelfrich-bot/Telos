@@ -217,6 +217,46 @@ export async function updateQuestionRoute(request: Request, ctx: Ctx, id: number
   return json({ question: questionView(q) });
 }
 
+// POST /api/courses/:id/topics/rename
+// Renames a topic in the course's configured list and on every question that
+// carries it, so a rename never orphans questions under an old label.
+export async function renameTopicRoute(request: Request, ctx: Ctx, id: number): Promise<Response> {
+  const course = await getCourse(ctx.kv, id);
+  if (!course) return json({ error: "course not found" }, 404);
+
+  const body = await readJson(request);
+  if (!body.ok) return badRequest("request body must be a JSON object");
+
+  const from = collapseSingleLine(body.value!.from);
+  const to = collapseSingleLine(body.value!.to).slice(0, MAX_TITLE);
+  if (!from) return badRequest("from is required", 422);
+  if (!to) return badRequest("to is required", 422);
+
+  if (from !== to) {
+    // Replace in the configured list, dropping a duplicate if the new name
+    // already exists there.
+    const topics: string[] = [];
+    for (const t of course.topics) {
+      const next = t === from ? to : t;
+      if (!topics.includes(next)) topics.push(next);
+    }
+    course.topics = topics;
+    await saveCourse(ctx.kv, course);
+  }
+
+  let updated = 0;
+  if (from !== to) {
+    for (const q of await listQuestions(ctx.kv, id)) {
+      if (q.topic === from) {
+        q.topic = to;
+        await saveQuestion(ctx.kv, q);
+        updated++;
+      }
+    }
+  }
+  return json({ course: await courseView(ctx, course), updated });
+}
+
 // POST /api/questions/status
 // Bulk status change. Releasing sets released_at only when it is not already
 // set, so re-releasing an already-released question keeps its original

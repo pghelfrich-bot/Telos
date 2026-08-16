@@ -258,3 +258,159 @@ Deno.test("the instructor signs in, edits and releases a question, then signs ou
     (doc.querySelector(".logout") as any).click();
     await waitFor(() => doc.querySelector(".login-form") || null);
   }));
+
+// --- Telos: practice tab, guide search, topics editor ---
+
+Deno.test("the practice tab runs a deck filtered by topic and reports a summary", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const dom = loadPage(handler, `/c/${course.slug}`);
+    const doc = dom.window.document;
+    await waitFor(() => doc.querySelectorAll(".card").length === 3 || null);
+
+    // Open the Practice tab.
+    const practiceTab = Array.prototype.find.call(
+      doc.querySelectorAll(".tab"),
+      (t: any) => t.textContent === "Practice",
+    ) as any;
+    practiceTab.click();
+
+    // Restrict the deck to the Genetics topic (one card).
+    const cellsBox = Array.prototype.find.call(
+      doc.querySelectorAll(".practice-topic input"),
+      (b: any) => b.getAttribute("data-topic") === "Cells",
+    ) as any;
+    cellsBox.checked = false;
+    (doc.querySelector(".practice-start") as any).click();
+
+    await waitFor(() => doc.querySelector(".practice-card") || null);
+    const card = doc.querySelector(".practice-card") as any;
+    assert.equal(
+      card.querySelector(".question").textContent,
+      "What molecule carries genetic information?",
+      "only the Genetics card is in the deck",
+    );
+    assert.equal((doc.querySelector(".practice-progress") as any).textContent, "Card 1 of 1");
+
+    // The answer stays hidden until revealed, then the card can be marked.
+    assert.equal((card.querySelector(".practice-answer") as any).hidden, true);
+    (card.querySelector(".practice-reveal") as any).click();
+    assert.equal((card.querySelector(".practice-answer") as any).hidden, false);
+    (card.querySelector(".practice-got") as any).click();
+
+    await waitFor(() => doc.querySelector(".practice-summary") || null);
+    const summary = (doc.querySelector(".practice-summary") as any).textContent;
+    assert.ok(summary.includes("1 card"), "the summary counts the single card");
+    assert.ok(summary.includes("Nothing marked for review"), "nothing was missed");
+  }));
+
+Deno.test("a card marked review again comes back and feeds the missed deck", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const dom = loadPage(handler, `/c/${course.slug}`);
+    const doc = dom.window.document;
+    await waitFor(() => doc.querySelectorAll(".card").length === 3 || null);
+
+    const practiceTab = Array.prototype.find.call(
+      doc.querySelectorAll(".tab"),
+      (t: any) => t.textContent === "Practice",
+    ) as any;
+    practiceTab.click();
+    const cellsBox = Array.prototype.find.call(
+      doc.querySelectorAll(".practice-topic input"),
+      (b: any) => b.getAttribute("data-topic") === "Cells",
+    ) as any;
+    cellsBox.checked = false;
+    (doc.querySelector(".practice-start") as any).click();
+
+    await waitFor(() => doc.querySelector(".practice-card") || null);
+    (doc.querySelector(".practice-reveal") as any).click();
+    (doc.querySelector(".practice-miss") as any).click();
+
+    await waitFor(() => doc.querySelector(".practice-summary") || null);
+    assert.ok(
+      (doc.querySelector(".practice-summary") as any).textContent.includes("marked for review"),
+      "the summary reports the missed card",
+    );
+    assert.ok(doc.querySelector(".practice-again"), "a missed-cards rerun is offered");
+
+    // The rerun deck contains exactly the missed card.
+    (doc.querySelector(".practice-again") as any).click();
+    await waitFor(() => doc.querySelector(".practice-card") || null);
+    assert.equal((doc.querySelector(".practice-progress") as any).textContent, "Card 1 of 1");
+  }));
+
+Deno.test("the guide search narrows cards by text", () =>
+  withApp(async ({ handler, client }) => {
+    const course = await seedGuide(client);
+    const dom = loadPage(handler, `/c/${course.slug}`);
+    const doc = dom.window.document;
+    await waitFor(() => doc.querySelectorAll(".card").length === 3 || null);
+
+    const search = doc.querySelector(".guide-search") as any;
+    search.value = "mitochondrion";
+    search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+    const visible = Array.prototype.filter.call(doc.querySelectorAll(".card"), (c: any) => !c.hidden);
+    assert.equal(visible.length, 1);
+    assert.equal(
+      (visible[0] as any).querySelector(".question").textContent,
+      "What is the mitochondrion known for?",
+    );
+  }));
+
+Deno.test("the topics editor adds, renames, and removes topics without touching questions", () =>
+  withApp(async ({ handler, client }) => {
+    await client.call("POST", "/api/login", { json: { password: ADMIN_PASSWORD } });
+    const course = (await client.call("POST", "/api/courses", {
+      json: { title: "Topics Course", topics: ["Alpha", "Beta"] },
+    })).data.course;
+    await client.call("POST", `/api/course/${course.slug}/questions`, {
+      json: {
+        name: "Alpha Student", topic: "Alpha",
+        question: "A question filed under Alpha for the editor test.",
+        answer: "An answer filed under Alpha for the editor test.",
+      },
+    });
+
+    const dom = loadPage(handler, "/");
+    const doc = dom.window.document;
+    await waitFor(() => doc.querySelector(".login-form") || null);
+    (doc.querySelector('[name="password"]') as any).value = ADMIN_PASSWORD;
+    (doc.querySelector(".login-form") as any)
+      .dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => doc.querySelector(".course-row") || null);
+    (doc.querySelector(".open-course") as any).click();
+    await waitFor(() => doc.querySelector("#settings-panel .topics-editor") || null);
+
+    function topicRow(name: string) {
+      return Array.prototype.find.call(
+        doc.querySelectorAll("#settings-panel .topic-row"),
+        (r: any) => r.getAttribute("data-topic") === name,
+      ) as any;
+    }
+
+    // Add a topic.
+    (doc.querySelector(".topic-add-input") as any).value = "Gamma";
+    (doc.querySelector(".topic-add") as any).click();
+    await waitFor(() => topicRow("Gamma") || null);
+
+    // Rename Alpha; the question follows the rename.
+    topicRow("Alpha").querySelector(".topic-rename").click();
+    const renameInput = await waitFor(() => doc.querySelector(".topic-rename-input") || null);
+    (renameInput as any).value = "Cell Structure";
+    (doc.querySelector(".topic-rename-save") as any).click();
+    await waitFor(() => topicRow("Cell Structure") || null);
+
+    // Remove Beta; the configured list shrinks but questions are untouched.
+    topicRow("Beta").querySelector(".topic-remove").click();
+    await waitFor(() => (topicRow("Beta") ? null : true));
+
+    const fresh = (await client.call("GET", "/api/courses")).data.courses
+      .find((c: any) => c.id === course.id);
+    assert.deepEqual(fresh.topics, ["Cell Structure", "Gamma"]);
+    const list = (await client.call("GET", `/api/courses/${course.id}/questions`)).data.questions;
+    const q = list.find((x: any) => x.author === "Alpha Student");
+    assert.equal(q.topic, "Cell Structure", "the question followed the rename");
+    assert.equal(list.length, 1, "no questions were deleted");
+  }));

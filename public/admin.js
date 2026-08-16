@@ -57,7 +57,8 @@
         },
       },
       [
-        el("h1", { text: "Instructor sign in" }),
+        el("h1", { text: "Telos" }),
+        el("p", { class: "hint", text: "Instructor sign in" }),
         el("label", { class: "field" }, [el("span", { class: "field-label", text: "Password" }), password]),
         error,
         submit,
@@ -72,7 +73,7 @@
     clear(root);
     root.appendChild(
       el("header", { class: "admin-header" }, [
-        el("h1", { text: "Study guide" }),
+        el("h1", { text: "Telos" }),
         el("button", {
           class: "logout no-print",
           type: "button",
@@ -478,6 +479,16 @@
     panel.appendChild(el("p", { class: "hint", text: "Paste this link into Canvas. Anyone with it can view and submit." }));
     panel.appendChild(el("div", { class: "link-row" }, [linkInput, copyBtn]));
 
+    panel.appendChild(el("h3", { text: "Topics" }));
+    panel.appendChild(
+      el("p", {
+        class: "hint",
+        text:
+          "Removing a topic never deletes its questions; they keep their label and stay in the guide. Renaming updates every question that carries the topic.",
+      })
+    );
+    panel.appendChild(renderTopicsEditor(panel, main, course));
+
     panel.appendChild(el("h3", { text: "Export" }));
     panel.appendChild(
       el("div", { class: "export-row" }, [
@@ -520,6 +531,120 @@
         },
       })
     );
+  }
+
+  // The topic list editor: add, rename, and remove topics. Every operation
+  // round-trips through the API and re-renders settings with the fresh course.
+  function renderTopicsEditor(panel, main, course) {
+    var box = el("div", { class: "topics-editor" });
+    var err = el("div", { class: "form-error", role: "alert", hidden: true });
+
+    function fail(message) {
+      err.textContent = message;
+      err.hidden = false;
+    }
+
+    async function patchTopics(topics) {
+      var res = await api.send("PATCH", "/api/courses/" + course.id, { topics: topics });
+      if (res.status === 200 && res.data && res.data.course) {
+        renderSettings(panel, main, res.data.course);
+      } else {
+        fail((res.data && res.data.details && res.data.details.join(" ")) || "Could not update topics.");
+      }
+    }
+
+    (course.topics || []).forEach(function (topic) {
+      var row = el("div", { class: "topic-row", "data-topic": topic });
+
+      function showView() {
+        SG.clear(row);
+        row.appendChild(el("span", { class: "topic-name", text: topic }));
+        row.appendChild(
+          el("button", {
+            class: "topic-rename",
+            type: "button",
+            text: "Rename",
+            onclick: showRename,
+          })
+        );
+        row.appendChild(
+          el("button", {
+            class: "topic-remove",
+            type: "button",
+            text: "Remove",
+            onclick: async function () {
+              await patchTopics(
+                (course.topics || []).filter(function (t) {
+                  return t !== topic;
+                })
+              );
+            },
+          })
+        );
+      }
+
+      function showRename() {
+        SG.clear(row);
+        var input = el("input", { type: "text", class: "topic-rename-input", value: topic, maxlength: "200" });
+        row.appendChild(input);
+        row.appendChild(
+          el("button", {
+            class: "topic-rename-save",
+            type: "button",
+            text: "Save",
+            onclick: async function () {
+              var next = input.value.trim();
+              if (!next || next === topic) {
+                showView();
+                return;
+              }
+              var res = await api.send("POST", "/api/courses/" + course.id + "/topics/rename", {
+                from: topic,
+                to: next,
+              });
+              if (res.status === 200 && res.data && res.data.course) {
+                renderSettings(panel, main, res.data.course);
+              } else {
+                fail("Could not rename the topic.");
+              }
+            },
+          })
+        );
+        row.appendChild(
+          el("button", { class: "topic-rename-cancel", type: "button", text: "Cancel", onclick: showView })
+        );
+        input.focus();
+      }
+
+      showView();
+      box.appendChild(row);
+    });
+
+    var addInput = el("input", {
+      type: "text",
+      class: "topic-add-input",
+      placeholder: "New topic name",
+      maxlength: "200",
+    });
+    var addRow = el("div", { class: "topic-row topic-add-row" }, [
+      addInput,
+      el("button", {
+        class: "topic-add",
+        type: "button",
+        text: "Add topic",
+        onclick: async function () {
+          var name = addInput.value.trim();
+          if (!name) return;
+          var topics = (course.topics || []).slice();
+          if (topics.indexOf(name) === -1) topics.push(name);
+          await patchTopics(topics);
+        },
+      }),
+    ]);
+
+    box.appendChild(addRow);
+    box.appendChild(err);
+    return box;
   }
 
   function originOf() {

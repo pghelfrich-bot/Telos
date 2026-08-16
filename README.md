@@ -1,10 +1,11 @@
-# Study guide
+# Telos
 
-A small web app for collecting, curating, and publishing student study
-questions. Students submit an exam question along with their own answer. The
-instructor reviews a queue, edits the wording, and releases the good ones.
-Released questions appear as a topic-grouped study guide with answers hidden
-until clicked.
+Telos (from the Greek word for an ultimate aim) is a small web app for
+collecting, curating, and publishing student study questions. Students submit
+an exam question along with their own answer. The instructor reviews a queue,
+edits the wording, and releases the good ones. Released questions appear as a
+topic-grouped study guide with answers hidden until clicked, and a practice
+tab lets students quiz themselves on the topics they choose.
 
 One deployment holds every course the instructor teaches. Each course has its
 own unguessable student URL that gets pasted into Canvas. Students never log in.
@@ -94,6 +95,14 @@ tab. Nothing they do requires a login.
 You review submissions in the course **Queue**: edit the wording in place, then
 save and release, reject, or pull a released question back out of the guide.
 Multi-select and bulk release are there for clearing a backlog quickly.
+
+Topics are managed from the **Settings** tab. Adding or removing a topic never
+touches existing questions: a removed topic's questions keep their label and
+stay in the guide. Renaming a topic updates every question that carries it.
+
+Students get three tabs on the course page: the study guide with topic filters
+and search, a **Practice** tab where they pick topics and work through a
+shuffled deck of self-graded flashcards, and the submission form.
 
 ## What this tool does not do
 
