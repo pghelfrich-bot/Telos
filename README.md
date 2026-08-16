@@ -9,91 +9,74 @@ until clicked.
 One deployment holds every course the instructor teaches. Each course has its
 own unguessable student URL that gets pasted into Canvas. Students never log in.
 
-Built as a single Cloudflare Worker with a D1 database. Vanilla JavaScript, no
-build step, no framework. The only dependencies are `wrangler` and `jsdom`, and
-both are development-only.
+Built as a single Deno server with the built-in Deno KV store. Vanilla
+JavaScript on the front end, no build step, no framework. The server has zero
+runtime dependencies; the only development dependency is `jsdom`, used by the
+tests.
 
 ## Requirements
 
-- Node.js 18 or newer
-- A Cloudflare account
-- `npm install` to pull in `wrangler` and `jsdom`
+- [Deno](https://deno.com) 2.x (`curl -fsSL https://deno.land/install.sh | sh`)
+- A free [Deno Deploy](https://deno.com/deploy) account for hosting
 
 ## Local development
 
-1. Copy the example secrets file and edit the values:
+1. Copy the example environment file and edit the values:
 
    ```
-   cp .dev.vars.example .dev.vars
+   cp .env.example .env
    ```
 
    Set `ADMIN_PASSWORD` to the instructor password and `SESSION_SECRET` to a
    long random string.
 
-2. Apply the database migration to the local D1 database:
+2. Start the server:
 
    ```
-   npm run migrate:local
+   deno task dev
    ```
 
-3. Start the worker:
-
-   ```
-   npm run dev
-   ```
-
-   The instructor console is at `/`. A course guide is at `/c/<slug>`.
+   It listens on http://localhost:8000. The instructor console is at `/`, and a
+   course guide is at `/c/<slug>`. Data is stored in a local Deno KV database
+   automatically; there is nothing else to set up.
 
 ## Tests
 
-The tests run against a real local worker, not mocks. Each suite boots
-`wrangler dev` against a clean, freshly migrated database.
+The tests run the real request handler in-process against a fresh in-memory KV
+database, so there is no server to start and no external services.
 
 ```
-npm test
+deno task test
 ```
 
-`test/api.test.mjs` covers the worker routes. `test/ui.test.mjs` loads the real
-`public/` files in jsdom and drives them against a running worker.
+`test/api_test.ts` covers the routes. `test/ui_test.ts` loads the real
+`public/` files in jsdom and drives them against the handler.
 
-## Deploy
+## Deploy to Deno Deploy
 
-1. Create the D1 database:
+There is no database to create and no `database_id` to paste. Deno Deploy
+provisions the KV store for the project automatically.
 
-   ```
-   npx wrangler d1 create study-guide
-   ```
+1. Push this repository to GitHub.
 
-2. Copy the `database_id` that the command prints and paste it into
-   `wrangler.jsonc`, replacing the placeholder in the `d1_databases` block.
+2. In the Deno Deploy dashboard, create a new project and link it to the GitHub
+   repository. Set the entry point to `main.ts`.
 
-3. Apply the migration to the remote database:
+3. Add two environment variables to the project (Settings, then Environment
+   Variables):
 
-   ```
-   npm run migrate:remote
-   ```
+   - `ADMIN_PASSWORD` — the instructor password
+   - `SESSION_SECRET` — a long random string. If you change it later, every
+     instructor session is signed out.
 
-4. Set the two secrets. These live in Cloudflare, not in the repository:
+4. Deploy. Deno Deploy builds on every push to the linked branch, so future
+   updates go out by pushing to GitHub.
 
-   ```
-   npx wrangler secret put ADMIN_PASSWORD
-   npx wrangler secret put SESSION_SECRET
-   ```
-
-   Use a long random value for `SESSION_SECRET`. If you ever change it, every
-   instructor session is signed out.
-
-5. Deploy:
-
-   ```
-   npx wrangler deploy
-   ```
-
-The hourly submission ceiling per IP defaults to 200 and can be overridden with
-the `RATE_LIMIT_SUBMISSIONS_PER_HOUR` variable in `wrangler.jsonc`. It is a
+The hourly submission ceiling per IP defaults to 200 and can be raised or
+lowered with the `RATE_LIMIT_SUBMISSIONS_PER_HOUR` environment variable. It is a
 whole-class brake, not a per-student quota, because a lab section usually shares
 one campus IP address. Do not set it below about 100 or you can lock out a class
-on the first day.
+on the first day it is used.
 
 ## Adding a course and sharing the link
 
@@ -101,7 +84,7 @@ on the first day.
 2. Under **Courses**, create a course with a title and a comma separated list of
    topics.
 3. Open the course and go to the **Settings** tab.
-4. Copy the student link. It looks like `https://your-worker.example/c/<slug>`.
+4. Copy the student link. It looks like `https://your-project.deno.dev/c/<slug>`.
 5. Paste that link into Canvas, for example as an external URL in a module or in
    an announcement.
 

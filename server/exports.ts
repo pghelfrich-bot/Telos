@@ -1,49 +1,46 @@
 // Exports. Markdown is the public study guide grouped by topic; CSV is the full
 // instructor record including rejected questions and private notes.
 
-import { json, badRequest, parseTopics, effective } from "./lib.js";
+import { badRequest, effective, json } from "./lib.ts";
+import { getCourse, listQuestions, type Course, type Question } from "./store.ts";
+import type { Ctx } from "./types.ts";
 
 // GET /api/courses/:id/export?format=md|csv
-export async function exportCourse(env, id, url) {
-  const course = await env.DB.prepare(`SELECT * FROM courses WHERE id = ?`).bind(id).first();
+export async function exportCourse(ctx: Ctx, id: number, url: URL): Promise<Response> {
+  const course = await getCourse(ctx.kv, id);
   if (!course) return json({ error: "course not found" }, 404);
 
   const format = url.searchParams.get("format") || "md";
-  if (format === "md") return exportMarkdown(env, course);
-  if (format === "csv") return exportCsv(env, course);
+  const questions = await listQuestions(ctx.kv, id);
+  if (format === "md") return exportMarkdown(course, questions);
+  if (format === "csv") return exportCsv(course, questions);
   return badRequest("format must be md or csv", 422);
 }
 
-async function exportMarkdown(env, course) {
-  const rows = await env.DB.prepare(
-    `SELECT topic, question, answer, edited_question, edited_answer
-       FROM questions
-       WHERE course_id = ? AND status = 'released'
-       ORDER BY released_at DESC, created_at DESC`
-  )
-    .bind(course.id)
-    .all();
+function exportMarkdown(course: Course, all: Question[]): Response {
+  const rows = all
+    .filter((q) => q.status === "released")
+    .sort((a, b) => (b.released_at || 0) - (a.released_at || 0) || b.created_at - a.created_at);
 
-  const groups = new Map();
-  for (const r of rows.results) {
+  const groups = new Map<string, Question[]>();
+  for (const r of rows) {
     const key = r.topic || "";
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    groups.get(key)!.push(r);
   }
 
   // Configured topics first, in their configured order; then any extra topics
   // that appear on questions, with the untitled group last.
-  const configured = parseTopics(course.topics);
-  const orderedKeys = [];
-  for (const t of configured) if (groups.has(t)) orderedKeys.push(t);
-  const extras = [...groups.keys()].filter((k) => k !== "" && !configured.includes(k)).sort();
+  const orderedKeys: string[] = [];
+  for (const t of course.topics) if (groups.has(t)) orderedKeys.push(t);
+  const extras = [...groups.keys()].filter((k) => k !== "" && !course.topics.includes(k)).sort();
   orderedKeys.push(...extras);
   if (groups.has("")) orderedKeys.push("");
 
   let md = `# ${course.title}\n`;
   for (const key of orderedKeys) {
     md += `\n## ${key === "" ? "Other" : key}\n`;
-    for (const r of groups.get(key)) {
+    for (const r of groups.get(key)!) {
       md += `\n### ${effective(r.edited_question, r.question)}\n\n${effective(r.edited_answer, r.answer)}\n`;
     }
   }
@@ -58,22 +55,15 @@ async function exportMarkdown(env, course) {
 
 // Quote every field per RFC 4180: wrap in double quotes and double any quotes
 // inside. This keeps embedded commas, quotes, and newlines intact.
-function csvField(value) {
+function csvField(value: unknown): string {
   const s = value == null ? "" : String(value);
   return '"' + s.replace(/"/g, '""') + '"';
 }
 
-async function exportCsv(env, course) {
-  const rows = await env.DB.prepare(
-    `SELECT id, status, topic, author, question, answer, edited_question, edited_answer, notes, created_at, released_at
-       FROM questions
-       WHERE course_id = ?
-       ORDER BY created_at ASC, id ASC`
-  )
-    .bind(course.id)
-    .all();
+function exportCsv(course: Course, all: Question[]): Response {
+  const rows = [...all].sort((a, b) => a.created_at - b.created_at || a.id - b.id);
 
-  const columns = [
+  const columns: (keyof Question)[] = [
     "id",
     "status",
     "topic",
@@ -88,7 +78,7 @@ async function exportCsv(env, course) {
   ];
 
   let out = columns.map(csvField).join(",") + "\r\n";
-  for (const r of rows.results) {
+  for (const r of rows) {
     out += columns.map((c) => csvField(r[c])).join(",") + "\r\n";
   }
 

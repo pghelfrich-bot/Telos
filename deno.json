@@ -1,0 +1,12 @@
+{
+  "unstable": ["kv"],
+  "tasks": {
+    "dev": "deno run --allow-net --allow-read --allow-write --allow-env --env-file main.ts",
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env main.ts",
+    "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-sys test/"
+  },
+  "fmt": {
+    "lineWidth": 110
+  },
+  "lock": false
+}
