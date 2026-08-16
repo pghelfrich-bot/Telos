@@ -4,7 +4,7 @@
 
 import { clientIp, json } from "./lib.ts";
 import { getCourse, submitQuestion } from "./public.ts";
-import { health } from "./health.ts";
+import { liveness, storageCheck } from "./health.ts";
 import { hasSession, login, logout, me } from "./auth.ts";
 import {
   bulkStatusRoute,
@@ -131,7 +131,7 @@ async function route(request: Request, ctx: Ctx, url: URL): Promise<Response> {
 
   // --- Public routes ---
   if (seg[0] === "health" && seg.length === 1) {
-    if (method === "GET") return health(ctx);
+    if (method === "GET") return liveness();
     return methodNotAllowed("GET");
   }
   if (seg[0] === "course" && seg.length === 2) {
@@ -212,6 +212,14 @@ function matchProtected(seg: string[]): ProtectedHandler | null {
       };
     }
     return null;
+  }
+
+  // /api/storage-check
+  if (seg[0] === "storage-check" && seg.length === 1) {
+    return (_request, ctx, _url, method) => {
+      if (method === "GET") return storageCheck(ctx);
+      return methodNotAllowed("GET");
+    };
   }
 
   // /api/questions/status must be checked before /api/questions/:id

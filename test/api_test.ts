@@ -3,6 +3,7 @@
 
 import assert from "./assert.ts";
 import { collapseSingleLine } from "../server/lib.ts";
+import { resetThrottle } from "../server/throttle.ts";
 import { ADMIN_PASSWORD, type App, type Client, newApp } from "./helpers.ts";
 
 // --- small helpers ---
@@ -442,12 +443,13 @@ Deno.test("the server serves the SPA shell for a student route", () =>
 
 // --- storage health probe ---
 
-Deno.test("the health probe reports durable storage with a stable marker", () =>
+Deno.test("the storage probe reports durable storage with a stable marker", () =>
   withApp({}, async ({ client }) => {
-    const first = await client.call("GET", "/api/health");
+    await login(client);
+    const first = await client.call("GET", "/api/storage-check");
     assert.equal(first.status, 200);
     assert.equal(first.data.marker_created_this_request, true);
-    const second = await client.call("GET", "/api/health");
+    const second = await client.call("GET", "/api/storage-check");
     assert.equal(second.data.marker, first.data.marker, "marker is stable on durable storage");
     assert.equal(second.data.marker_created_this_request, false);
   }));
@@ -502,4 +504,77 @@ Deno.test("removing a topic from the course leaves its questions intact", () =>
     const guide = await client.call("GET", `/api/course/${course.slug}`);
     assert.equal(guide.data.questions.length, 1);
     assert.equal(guide.data.questions[0].topic, "Drop");
+  }));
+
+// --- hardening ---
+
+Deno.test("a missing or weak SESSION_SECRET disables sign in instead of failing open", () =>
+  withApp({ SESSION_SECRET: "" }, async ({ client }) => {
+    // Login refuses rather than issuing a cookie signed with an empty key.
+    const res = await client.call("POST", "/api/login", { json: { password: ADMIN_PASSWORD } });
+    assert.equal(res.status, 503, "sign in is refused when the signing key is unusable");
+
+    // A forged cookie is not accepted either.
+    const forged = await client.call("GET", "/api/courses", {
+      headers: { cookie: "sg_session=v1." + (Date.now() + 100000) + ".deadbeef" },
+    });
+    assert.equal(forged.status, 401, "no cookie is honoured without a usable signing key");
+  }));
+
+Deno.test("a short SESSION_SECRET is treated as unconfigured", () =>
+  withApp({ SESSION_SECRET: "tooshort" }, async ({ client }) => {
+    const res = await client.call("POST", "/api/login", { json: { password: ADMIN_PASSWORD } });
+    assert.equal(res.status, 503);
+  }));
+
+Deno.test("the public health endpoint leaks nothing and the storage probe needs a session", () =>
+  withApp({}, async ({ client }) => {
+    const pub = await client.call("GET", "/api/health");
+    assert.equal(pub.status, 200);
+    assert.deepEqual(pub.data, { ok: true }, "liveness reveals only that the app is up");
+    assert.equal("course_count" in pub.data, false);
+
+    const probe = await client.call("GET", "/api/storage-check");
+    assert.equal(probe.status, 401, "the storage probe is not public");
+  }));
+
+Deno.test("an oversized request body is rejected before parsing", () =>
+  withApp({}, async ({ client }) => {
+    await login(client);
+    const course = await makeCourse(client, { title: "Big Body Course", topics: [] });
+    const huge = JSON.stringify({ name: "Flooder", topic: "", question: "x".repeat(200000), answer: "y" });
+    const res = await client.call("POST", `/api/course/${course.slug}/questions`, {
+      headers: { "content-type": "application/json" },
+      raw: huge,
+    });
+    assert.equal(res.status, 400, "the body is refused rather than parsed");
+
+    const list = (await client.call("GET", `/api/courses/${course.id}/questions`)).data.questions;
+    assert.equal(list.length, 0, "nothing was stored");
+  }));
+
+Deno.test("public guide reads are throttled per IP", () =>
+  withApp({ RATE_LIMIT_READS_PER_HOUR: "3" }, async ({ client }) => {
+    resetThrottle();
+    await login(client);
+    const course = await makeCourse(client, { title: "Read Throttle Course", topics: [] });
+    await client.call("POST", "/api/logout");
+
+    for (let i = 1; i <= 3; i++) {
+      const ok = await client.call("GET", `/api/course/${course.slug}`, {
+        headers: { "x-forwarded-for": "198.51.100.7" },
+      });
+      assert.equal(ok.status, 200, `read ${i} should be allowed`);
+    }
+    const blocked = await client.call("GET", `/api/course/${course.slug}`, {
+      headers: { "x-forwarded-for": "198.51.100.7" },
+    });
+    assert.equal(blocked.status, 429);
+    assert.ok(blocked.headers.get("retry-after"));
+
+    const other = await client.call("GET", `/api/course/${course.slug}`, {
+      headers: { "x-forwarded-for": "198.51.100.8" },
+    });
+    assert.equal(other.status, 200, "a different IP has its own budget");
+    resetThrottle();
   }));

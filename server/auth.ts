@@ -10,6 +10,21 @@ const COOKIE_NAME = "sg_session";
 const SESSION_TTL_MS = 7 * 24 * HOUR_MS;
 const encoder = new TextEncoder();
 
+// A signing key shorter than this is treated as unconfigured. Without this the
+// app would fall back to signing sessions with an empty string, and anyone who
+// knows the scheme could forge an instructor cookie. Fail closed instead.
+const MIN_SECRET_LENGTH = 16;
+
+export function sessionSecret(env: Record<string, string | undefined>): string | null {
+  const secret = env.SESSION_SECRET || "";
+  return secret.length >= MIN_SECRET_LENGTH ? secret : null;
+}
+
+export function adminPassword(env: Record<string, string | undefined>): string | null {
+  const password = env.ADMIN_PASSWORD || "";
+  return password.length > 0 ? password : null;
+}
+
 function toHex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -79,9 +94,12 @@ function setCookieHeader(token: string, request: Request, maxAgeSeconds: number)
   return attrs.join("; ");
 }
 
-// True when the request carries a valid session cookie.
+// True when the request carries a valid session cookie. With no usable signing
+// key, no cookie is ever accepted.
 export async function hasSession(request: Request, ctx: Ctx): Promise<boolean> {
-  return verifySession(ctx.env.SESSION_SECRET || "", getCookie(request, COOKIE_NAME));
+  const secret = sessionSecret(ctx.env);
+  if (!secret) return false;
+  return verifySession(secret, getCookie(request, COOKIE_NAME));
 }
 
 // POST /api/login
@@ -91,15 +109,25 @@ export async function login(request: Request, ctx: Ctx): Promise<Response> {
     return json({ error: "too many attempts, try again later" }, 429, { "retry-after": String(rl.retryAfter) });
   }
 
+  const secret = sessionSecret(ctx.env);
+  const expected = adminPassword(ctx.env);
+  if (!secret || !expected) {
+    console.error(
+      "login refused: ADMIN_PASSWORD must be set and SESSION_SECRET must be at least " +
+        MIN_SECRET_LENGTH +
+        " characters",
+    );
+    return json({ error: "this deployment is not configured for sign in" }, 503);
+  }
+
   const body = await readJson(request);
   if (!body.ok) return badRequest("request body must be a JSON object");
 
   const password = String(body.value!.password == null ? "" : body.value!.password);
-  const expected = ctx.env.ADMIN_PASSWORD || "";
-  const ok = expected.length > 0 && (await constantTimeEqual(password, expected));
+  const ok = await constantTimeEqual(password, expected);
   if (!ok) return json({ error: "invalid password" }, 401);
 
-  const token = await issueSession(ctx.env.SESSION_SECRET || "");
+  const token = await issueSession(secret);
   return json({ ok: true }, 200, { "set-cookie": setCookieHeader(token, request, SESSION_TTL_MS / 1000) });
 }
 

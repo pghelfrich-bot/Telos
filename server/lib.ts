@@ -11,10 +11,22 @@ export function badRequest(errors: string | string[], status = 400): Response {
   return json({ error: "invalid request", details: ([] as string[]).concat(errors) }, status);
 }
 
+// The largest request body worth accepting. The biggest legitimate payload is a
+// question with four capped fields plus notes, well under 16 KB, so this leaves
+// generous headroom while stopping a huge body from being parsed into memory.
+export const MAX_BODY_BYTES = 64 * 1024;
+
 // Read and parse a JSON request body, returning { ok, value } or { ok:false }.
+// Oversized bodies are rejected before parsing.
 export async function readJson(request: Request): Promise<{ ok: boolean; value?: Record<string, unknown> }> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return { ok: false };
   try {
-    const value = await request.json();
+    // Read as text first so an absent or dishonest content-length cannot slip a
+    // huge body past the check above.
+    const text = await request.text();
+    if (text.length > MAX_BODY_BYTES) return { ok: false };
+    const value = JSON.parse(text);
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       return { ok: false };
     }

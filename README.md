@@ -104,6 +104,40 @@ Students get three tabs on the course page: the study guide with topic filters
 and search, a **Practice** tab where they pick topics and work through a
 shuffled deck of self-graded flashcards, and the submission form.
 
+## Security and running costs
+
+Telos calls no third-party or AI APIs and has no runtime dependencies, so there
+is no metered service behind it that traffic could run up a bill on. The only
+usage that traffic creates is requests and KV operations on the host itself.
+
+On the Deno Deploy free plan, exceeding the included quota pauses the app until
+the next cycle rather than billing an overage. That is a service interruption,
+not a surprise invoice. On a paid plan, overage is billed, so if you upgrade,
+set a budget alert.
+
+What is in place against abuse:
+
+- Submissions are rate limited per IP and backed by durable storage, so the
+  limit holds across server instances.
+- Sign in attempts are rate limited per IP, and the password is compared in
+  constant time.
+- Reading a guide is throttled per IP in memory. It is deliberately not backed
+  by storage, because a storage-backed limiter on a read would cost more
+  operations than the read it protects.
+- Request bodies over 64 KB are refused before being parsed.
+- Sign in fails closed. If `SESSION_SECRET` is missing or shorter than 16
+  characters, the app refuses to issue or accept sessions instead of falling
+  back to signing with an empty key, and it says so in the startup logs.
+- All student text is written to the page as text, never as markup, so a
+  submitted script tag is displayed rather than run.
+- The only public endpoints are the guide, the submission form, sign in, and a
+  liveness check that touches no data. The storage diagnostic at
+  `/api/storage-check` requires a session.
+
+The two things that matter most on your side: use a long random
+`SESSION_SECRET`, and pick an instructor password that is not guessable, since
+one shared password is the only thing protecting the console.
+
 ## What this tool does not do
 
 Read this section before you use the tool for anything that matters.

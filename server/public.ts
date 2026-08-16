@@ -10,12 +10,22 @@ import {
   validateSubmission,
 } from "./lib.ts";
 import { createQuestion, enforceRateLimit, getCourseBySlug, listQuestions } from "./store.ts";
+import { readLimit, throttle } from "./throttle.ts";
 import type { Ctx } from "./types.ts";
 
 // GET /api/course/:slug
 // Returns the course header and its released questions only. Never exposes
 // internal ids, and only exposes author names when show_authors is on.
 export async function getCourse(ctx: Ctx, slug: string): Promise<Response> {
+  // Reading the guide scans every question in the course, so blunt a client
+  // hammering this endpoint before doing the work.
+  const rl = throttle(`read:${ctx.ip}`, readLimit(ctx.env), HOUR_MS);
+  if (!rl.allowed) {
+    return json({ error: "too many requests, try again shortly" }, 429, {
+      "retry-after": String(rl.retryAfter),
+    });
+  }
+
   const course = await getCourseBySlug(ctx.kv, slug);
   if (!course || course.archived) {
     return json({ error: "course not found" }, 404);
