@@ -14,6 +14,7 @@ import {
   updateQuestion,
   bulkStatus,
 } from "./admin.js";
+import { exportCourse } from "./exports.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -105,6 +106,12 @@ function matchProtected(seg) {
     if (seg.length === 3 && seg[2] === "questions") {
       return (request, env, url, method) => {
         if (method === "GET") return listQuestions(request, env, id, url);
+        return methodNotAllowed("GET");
+      };
+    }
+    if (seg.length === 3 && seg[2] === "export") {
+      return (request, env, url, method) => {
+        if (method === "GET") return exportCourse(env, id, url);
         return methodNotAllowed("GET");
       };
     }

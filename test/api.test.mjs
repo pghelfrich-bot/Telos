@@ -458,3 +458,78 @@ test("logout clears the session", async () => {
   const cleared = out.headers.get("set-cookie");
   assert.match(cleared, /Max-Age=0/, "logout should expire the cookie");
 });
+
+// --- Milestone 5: exports ---
+
+// Seed a course with named records: three released questions across configured
+// topics Beta and Alpha plus an extra topic Gamma, one rejected, one pending.
+function seedExport(slug) {
+  srv.exec(`INSERT INTO courses (slug, title, topics, accepting) VALUES ('${slug}', 'Export Course', '["Beta","Alpha"]', 1);`);
+  const cid = srv.exec(`SELECT id FROM courses WHERE slug = '${slug}';`)[0].id;
+  srv.exec(
+    `INSERT INTO questions (course_id, author, topic, question, answer, status, released_at, notes) VALUES
+      (${cid}, 'Alpha Author', 'Alpha', 'Alpha released question, with a comma.', 'Alpha answer body text here.', 'released', 100, ''),
+      (${cid}, 'Beta Author', 'Beta', 'Beta released with a "quote" inside.', 'Beta answer body text here.', 'released', 200, ''),
+      (${cid}, 'Gamma Author', 'Gamma', 'Gamma extra topic released question here.', 'Gamma answer body text here.', 'released', 150, ''),
+      (${cid}, 'Rejected Author', 'Alpha', 'Rejected secret question text ZZZ here.', 'Rejected answer body text here.', 'rejected', NULL, 'a private note, with comma'),
+      (${cid}, 'Pending Author', 'Alpha', 'Pending hidden question text QQQ here.', 'Pending answer body text here.', 'pending', NULL, '');`
+  );
+  return cid;
+}
+
+test("export requires authentication", async () => {
+  const cid = seedExport("exp-auth");
+  const res = await api(srv.baseUrl, `/api/courses/${cid}/export?format=md`);
+  assert.equal(res.status, 401);
+});
+
+test("Markdown export groups released questions by topic in configured order and excludes a rejected question", async () => {
+  const cid = seedExport("exp-md");
+  const { cookie } = await login();
+  const res = await api(srv.baseUrl, `/api/courses/${cid}/export?format=md`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/markdown/);
+  const md = res.text;
+
+  // Released questions are present.
+  assert.ok(md.includes("Alpha released question, with a comma."), "released Alpha question present");
+  assert.ok(md.includes('Beta released with a "quote" inside.'), "released Beta question present");
+  assert.ok(md.includes("Gamma extra topic released question here."), "released Gamma question present");
+
+  // The rejected and pending questions are excluded by name.
+  assert.ok(!md.includes("Rejected secret question text ZZZ"), "rejected question must be excluded");
+  assert.ok(!md.includes("Pending hidden question text QQQ"), "pending question must be excluded");
+
+  // Configured topics come first in their configured order (Beta before Alpha),
+  // then the unconfigured Gamma is appended.
+  const iBeta = md.indexOf("## Beta");
+  const iAlpha = md.indexOf("## Alpha");
+  const iGamma = md.indexOf("## Gamma");
+  assert.ok(iBeta >= 0 && iAlpha >= 0 && iGamma >= 0, "all three topic headings present");
+  assert.ok(iBeta < iAlpha, "configured order Beta before Alpha");
+  assert.ok(iAlpha < iGamma, "extra topic appended after configured topics");
+});
+
+test("CSV export includes every question with notes and quotes commas and quotes", async () => {
+  const cid = seedExport("exp-csv");
+  const { cookie } = await login();
+  const res = await api(srv.baseUrl, `/api/courses/${cid}/export?format=csv`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/csv/);
+  const csv = res.text;
+
+  // The rejected question and its private notes are included.
+  assert.ok(csv.includes("Rejected secret question text ZZZ here."), "rejected question is in the CSV");
+  assert.ok(csv.includes('"a private note, with comma"'), "notes with a comma are quoted");
+
+  // Embedded commas and quotes are quoted per RFC 4180.
+  assert.ok(csv.includes('"Alpha released question, with a comma."'), "a field with a comma is quoted");
+  assert.ok(csv.includes('"Beta released with a ""quote"" inside."'), "a field with quotes doubles them");
+});
+
+test("export rejects an unknown format", async () => {
+  const cid = seedExport("exp-bad");
+  const { cookie } = await login();
+  const res = await api(srv.baseUrl, `/api/courses/${cid}/export?format=pdf`, { headers: { cookie } });
+  assert.equal(res.status, 422);
+});
